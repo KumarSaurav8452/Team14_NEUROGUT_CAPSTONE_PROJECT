@@ -2,7 +2,7 @@
 // SVM baseline and SHAP explanations of the deployed model (research/.../scz-ml, python -m sczml.extras).
 import { Section, Table, Bars, COBALT, TEAL, fmt } from "@/components/v2/ui";
 
-type Scores = { roc_auc: number; roc_auc_sd: number; roc_auc_ci95?: [number, number]; accuracy: number; precision: number; recall: number; f1: number };
+type Scores = { roc_auc: number; roc_auc_sd: number; roc_auc_ci95?: number[]; accuracy: number; precision: number; recall: number; f1: number };
 export type ExtrasData = {
   internal: Record<string, Scores>;
   external: Record<string, Scores> | null;

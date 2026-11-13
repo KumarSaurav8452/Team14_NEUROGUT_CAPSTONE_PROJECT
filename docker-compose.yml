@@ -15,14 +15,14 @@ services:
       context: ./neurogut-backend
       dockerfile: Dockerfile
     container_name: neurogut-backend
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"            # reachable only through nginx
     volumes:
       - backend-data:/app/db
       - backend-reports:/app/reports
     environment:
       - DATABASE_URL=sqlite:////app/db/neurogut.db
-      - JWT_SECRET=neurogut-docker-secret-change-in-prod
+      - JWT_SECRET=${JWT_SECRET:-neurogut-docker-secret-change-in-prod}   # set JWT_SECRET in .env for real use
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
       interval: 30s
@@ -37,15 +37,13 @@ services:
       context: ./neurogut-frontend
       dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_API_URL=http://localhost:8000
+        - NEXT_PUBLIC_API_URL=   # empty: browser calls /api on the same origin via nginx
     container_name: neurogut-frontend
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     depends_on:
       backend:
         condition: service_healthy
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
     restart: unless-stopped
 
   # --- Nginx Reverse Proxy ---
@@ -53,12 +51,14 @@ services:
     image: nginx:alpine
     container_name: neurogut-nginx
     ports:
-      - "80:80"
+      - "${NEUROGUT_PORT:-80}:80"   # e.g. NEUROGUT_PORT=8080 docker compose up
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
-      - backend
-      - frontend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
     restart: unless-stopped
 
 volumes:
