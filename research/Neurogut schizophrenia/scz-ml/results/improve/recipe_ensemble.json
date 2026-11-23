@@ -1,0 +1,22 @@
+{
+ "all": {
+  "n_configs": 144,
+  "per_cohort": {
+   "Li_2023_SCZ": 0.522,
+   "Thirion_2023A_SCZ": 0.631,
+   "Zhu_2020A_SCZ": 0.594,
+   "Zhu_2020B_SCZ": 0.789
+  },
+  "loso_mean": 0.634
+ },
+ "single_patient": {
+  "n_configs": 72,
+  "per_cohort": {
+   "Li_2023_SCZ": 0.529,
+   "Thirion_2023A_SCZ": 0.616,
+   "Zhu_2020A_SCZ": 0.585,
+   "Zhu_2020B_SCZ": 0.797
+  },
+  "loso_mean": 0.632
+ }
+}

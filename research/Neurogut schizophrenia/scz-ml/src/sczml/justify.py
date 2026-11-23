@@ -1,0 +1,131 @@
+"""Is the schizophrenia LOSO AUC of ~0.6 real, and why is it not higher? Three checks on the deploy setup.
+
+  within   = 5-fold CV inside each cohort on its own (no cohort shift): how strong the signal is per cohort
+  curve    = leave-one-study-out with 1, 2 or 3 training cohorts: does adding cohorts raise unseen-cohort AUC?
+  permute  = labels shuffled within each cohort, LOSO rerun: how often chance alone reaches the real AUC
+
+within and curve use the deployed ensemble (sczml.deploy). The permutation test needs hundreds of reruns, so it
+uses the same pipeline with a Random Forest only (fast), compared with that same pipeline on the real labels.
+
+python -m sczml.justify [n_permutations]   -> results/justify/justify.json + JUSTIFY.md
+"""
+
+from __future__ import annotations
+
+import itertools
+import json
+import sys
+import warnings
+
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import StratifiedKFold
+
+from sczml import data, deploy, models
+
+OUT = deploy.ROOT / "results" / "justify"
+SEED = deploy.SEED
+
+
+def ensemble_auc(x, y, study, tr, te) -> float:
+    feats = deploy.choose(x.iloc[tr], y.iloc[tr], study.iloc[tr])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        fitted = deploy.fit(x.iloc[tr][feats], y.iloc[tr], models.balanced_weights(y.iloc[tr], study.iloc[tr]))
+    return roc_auc_score(y.iloc[te], deploy.predict(fitted, x.iloc[te][feats]))
+
+
+def within(x, y, study) -> dict:
+    """5-fold CV inside each cohort: the signal when train and test share sequencer, country and protocol."""
+    out = {}
+    for s in sorted(study.unique()):
+        idx = np.flatnonzero(study.values == s)
+        xs, ys, ss = x.iloc[idx], y.iloc[idx], study.iloc[idx]
+        aucs = [ensemble_auc(xs, ys, ss, tr, te)
+                for tr, te in StratifiedKFold(5, shuffle=True, random_state=SEED).split(xs, ys)]
+        out[s] = {"n": int(len(idx)), "roc_auc": round(float(np.mean(aucs)), 3), "roc_auc_sd": round(float(np.std(aucs)), 3)}
+        print(f"  within {s}: {out[s]['roc_auc']}", flush=True)
+    return out
+
+
+def curve(x, y, study) -> dict:
+    """Unseen-cohort AUC by number of training cohorts (every held-out cohort x every training subset)."""
+    studies, rows = sorted(study.unique()), []
+    for held in studies:
+        te = np.flatnonzero(study.values == held)
+        others = [s for s in studies if s != held]
+        for k in range(1, len(others) + 1):
+            for train in itertools.combinations(others, k):
+                tr = np.flatnonzero(study.isin(train).values)
+                rows.append({"held_out": held, "n_train_cohorts": k, "train": list(train),
+                             "roc_auc": round(ensemble_auc(x, y, study, tr, te), 3)})
+                print(f"  curve {held} <- {train}: {rows[-1]['roc_auc']}", flush=True)
+    df = pd.DataFrame(rows)
+    summary = {int(k): {"mean": round(float(g.roc_auc.mean()), 3), "sd": round(float(g.roc_auc.std(ddof=0)), 3), "runs": int(len(g))}
+               for k, g in df.groupby("n_train_cohorts")}
+    return {"by_n_cohorts": summary, "runs": rows}
+
+
+def rf_loso(x, y, study) -> float:
+    aucs = []
+    for s in sorted(study.unique()):
+        tr, te = np.flatnonzero(study.values != s), np.flatnonzero(study.values == s)
+        feats = deploy.choose(x.iloc[tr], y.iloc[tr], study.iloc[tr])
+        rf = RandomForestClassifier(n_estimators=300, max_depth=8, min_samples_leaf=3, random_state=SEED, n_jobs=-1)
+        rf.fit(x.iloc[tr][feats], y.iloc[tr], sample_weight=models.balanced_weights(y.iloc[tr], study.iloc[tr]))
+        aucs.append(roc_auc_score(y.iloc[te], rf.predict_proba(x.iloc[te][feats])[:, 1]))
+    return float(np.mean(aucs))
+
+
+def permute(x, y, study, n: int) -> dict:
+    """Label-permutation test of the LOSO AUC; labels shuffled within each cohort keep every cohort's case rate."""
+    real = rf_loso(x, y, study)
+    rng = np.random.default_rng(SEED)
+    null = []
+    for i in range(n):
+        yp = y.copy()
+        for s in study.unique():
+            m = (study == s).values
+            yp[m] = rng.permutation(y[m].values)
+        null.append(rf_loso(x, yp, study))
+        if (i + 1) % 20 == 0:
+            print(f"  permutation {i + 1}/{n}: null mean {np.mean(null):.3f}", flush=True)
+    null = np.array(null)
+    return {"model": "Random Forest, deploy features, LOSO", "real_auc": round(real, 3), "n_permutations": n,
+            "null_mean": round(float(null.mean()), 3), "null_p95": round(float(np.percentile(null, 95)), 3),
+            "null_max": round(float(null.max()), 3), "p_value": round(float((1 + (null >= real).sum()) / (1 + n)), 4),
+            "null": [round(float(v), 4) for v in null]}
+
+
+def report(r: dict) -> str:
+    w, c, p = r["within"], r["curve"]["by_n_cohorts"], r["permutation"]
+    lines = ["# Why the unseen-cohort AUC is about 0.6, and why it is real", "",
+             "Generated by `python -m sczml.justify` (schizophrenia, deploy setup, seed 42).", "",
+             "## 1. Signal inside each cohort (5-fold CV within one study)", "", "| cohort | n | ROC-AUC |", "|---|---|---|"]
+    lines += [f"| {s} | {v['n']} | {v['roc_auc']} ± {v['roc_auc_sd']} |" for s, v in w.items()]
+    lines += ["", f"Mean within-cohort AUC: **{np.mean([v['roc_auc'] for v in w.values()]):.3f}**", "",
+              "## 2. Unseen-cohort AUC by number of training cohorts", "", "| training cohorts | mean ROC-AUC | runs |", "|---|---|---|"]
+    lines += [f"| {k} | {v['mean']} ± {v['sd']} | {v['runs']} |" for k, v in c.items()]
+    lines += ["", "## 3. Label-permutation test (LOSO)", "",
+              f"Real AUC {p['real_auc']} vs {p['n_permutations']} shuffled-label runs: null mean {p['null_mean']}, "
+              f"95th percentile {p['null_p95']}, max {p['null_max']}. **p = {p['p_value']}**", ""]
+    return "\n".join(lines)
+
+
+def main(argv=None):
+    args = argv or sys.argv[1:]
+    n_perm = int(args[0]) if args else 200
+    OUT.mkdir(parents=True, exist_ok=True)
+    meta, frac, _, _ = data.load()
+    y, study = meta["y"], meta["study_id"]
+    x = deploy.log_features(frac)
+    res = {"within": within(x, y, study), "curve": curve(x, y, study), "permutation": permute(x, y, study, n_perm)}
+    (OUT / "justify.json").write_text(json.dumps(res, indent=1))
+    (OUT / "JUSTIFY.md").write_text(report(res), encoding="utf-8")
+    print("done ->", OUT, flush=True)
+
+
+if __name__ == "__main__":
+    main()

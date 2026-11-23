@@ -1,0 +1,72 @@
+{
+ "n_configs": 144,
+ "deployed_rf_loso": 0.614,
+ "best_screen": {
+  "ranks": "sgf",
+  "floor": 0.01,
+  "transform": "log+pa",
+  "n_feat": 60,
+  "zscale": true,
+  "model": "rf",
+  "Li_2023_SCZ": 0.582,
+  "Thirion_2023A_SCZ": 0.659,
+  "Zhu_2020A_SCZ": 0.658,
+  "Zhu_2020B_SCZ": 0.753,
+  "loso_mean": 0.663
+ },
+ "nested": [
+  {
+   "held_out": "Li_2023_SCZ",
+   "chosen": {
+    "ranks": "gf",
+    "floor": 0.01,
+    "transform": "log",
+    "n_feat": 15,
+    "zscale": true,
+    "model": "lr"
+   },
+   "inner_auc": 0.701,
+   "held_out_auc": 0.493
+  },
+  {
+   "held_out": "Thirion_2023A_SCZ",
+   "chosen": {
+    "ranks": "sgfoc",
+    "floor": 0.01,
+    "transform": "log+pa",
+    "n_feat": 60,
+    "zscale": true,
+    "model": "rf"
+   },
+   "inner_auc": 0.621,
+   "held_out_auc": 0.642
+  },
+  {
+   "held_out": "Zhu_2020A_SCZ",
+   "chosen": {
+    "ranks": "sgf",
+    "floor": 0.1,
+    "transform": "log+pa",
+    "n_feat": 15,
+    "zscale": false,
+    "model": "rf"
+   },
+   "inner_auc": 0.661,
+   "held_out_auc": 0.563
+  },
+  {
+   "held_out": "Zhu_2020B_SCZ",
+   "chosen": {
+    "ranks": "sgf",
+    "floor": 0.1,
+    "transform": "log+pa",
+    "n_feat": 60,
+    "zscale": false,
+    "model": "rf"
+   },
+   "inner_auc": 0.561,
+   "held_out_auc": 0.695
+  }
+ ],
+ "nested_mean": 0.598
+}
